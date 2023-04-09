@@ -116,28 +116,45 @@ ASGI_APPLICATION = 'core.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/3.2/ref/settings/#databases
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql_psycopg2',
-        'NAME': 'boomslag_products_db',
-        'USER': 'boomslag',
-        'PASSWORD': 'postgres',
-        'HOST': 'db_products',
-        'PORT': '5432',
-    }
+    "default": env.db("DATABASE_URL"),
 }
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql_psycopg2',
+#         'NAME': 'boomslag_products_db',
+#         'USER': 'boomslag',
+#         'PASSWORD': 'postgres',
+#         'HOST': 'db_products',
+#         'PORT': '5432',
+#     }
+# }
 DATABASES["default"]["ATOMIC_REQUESTS"] = True
+
+
 
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://redis:6379/0",
+        "LOCATION": env("REDIS_URL"),
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            # "CONNECTION_POOL_KWARGS": {"max_connections": 250},
+            "PASSWORD": env("REDIS_PASSWORD", default=None),
+            "SSL": True,
         },
     }
 }
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django_redis.cache.RedisCache",
+#         "LOCATION": "redis://redis:6379/0",
+#         "OPTIONS": {
+#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+#             # "CONNECTION_POOL_KWARGS": {"max_connections": 250},
+#         },
+#     }
+# }
 # DEFAULT_CACHE_ALIAS = "default"
 
 # https://docs.djangoproject.com/en/3.2/ref/settings/#auth-password-validators
@@ -204,38 +221,16 @@ FILE_UPLOAD_PERMISSIONS = 0o640
 
 EMAIL_BACKEND='django.core.mail.backends.console.EmailBackend'
 
-ACTIVE_CAMPAIGN_URL=os.environ.get('ACTIVE_CAMPAIGN_URL')
-ACTIVE_CAMPAIGN_KEY=os.environ.get('ACTIVE_CAMPAIGN_KEY')
-
-INFURA_URL=os.environ.get('INFURA_URL')
-
-
 if not DEBUG:
     # CSRF_COOKIE_DOMAIN = os.environ.get('CSRF_COOKIE_DOMAIN_DEPLOY')
     ALLOWED_HOSTS=env.list('ALLOWED_HOSTS_DEPLOY')
     CORS_ORIGIN_WHITELIST =env.list('CORS_ORIGIN_WHITELIST_DEPLOY')
     CSRF_TRUSTED_ORIGINS =env.list('CSRF_TRUSTED_ORIGINS_DEPLOY')
 
-    DEFAULT_FROM_EMAIL = 'BoomSlag - Ecommerce <mail@boomslag.com>'
-    EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_HOST = env('EMAIL_HOST')
-    EMAIL_HOST_USER = env('EMAIL_HOST_USER')
-    EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD')
-    EMAIL_PORT = env('EMAIL_PORT')
-    EMAIL_USE_TLS = env('EMAIL_USE_TLS')
-
-    # CSRF_COOKIE_SECURE = True
-    # SESSION_COOKIE_SECURE = True
-
-    STRIPE_PUBLIC_KEY = env('STRIPE_PUBLIC_KEY_DEPLOY')
-    STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY_DEPLOY')
-    STRIPE_WEBHOOK_SECRET= env('STRIPE_WEBHOOK_SECRET_DEPLOY')
-
     # django-ckeditor will not work with S3 through django-storages without this line in settings.py
     AWS_QUERYSTRING_AUTH = False
 
     # aws settings
-
     AWS_ACCESS_KEY_ID = env('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = env('AWS_SECRET_ACCESS_KEY')
     AWS_STORAGE_BUCKET_NAME = env('AWS_STORAGE_BUCKET_NAME')
