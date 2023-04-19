@@ -12,6 +12,7 @@ from PIL import Image
 from uuid import UUID
 import tempfile
 import rsa
+import secrets
 import json
 import requests
 from django.core.validators import validate_slug
@@ -162,6 +163,12 @@ def is_valid_nft_address(address):
 
     
 def get_public_product_data(identifier):
+    # cache_key = f"public_product_data-{identifier}"
+    # cached_result = cache.get(cache_key)
+
+    # if cached_result:
+    #     return cached_result
+    
     if is_valid_uuid(identifier):
         product, discount = get_discounted_product(id=identifier)
     elif is_valid_nft_address(identifier):
@@ -203,7 +210,8 @@ def get_public_product_data(identifier):
         'details': product.data,
         'discount': discount,
     }
-
+    # Cache the result
+    # cache.set(cache_key, product_data, 300)  # Cache for 300 seconds
     return product_data
 
 
@@ -248,37 +256,37 @@ class CreateProductView(StandardAPIView):
         payload = validate_token(request)
         data = self.request.data
 
-        try:
-            # if payload.get('user').get('role') != 'seller':
-            #     raise PermissionError('You dont have the permissions to create a product.')
-            
-            user_id = payload['user_id']
+        # try:
+        # if payload.get('user').get('role') != 'seller':
+        #     raise PermissionError('You dont have the permissions to create a product.')
+        
+        user_id = payload['user_id']
 
-            # Code to create product
-            title = data['title']
-            category = data['category']
-            category = get_object_or_404(Category, name=category)
+        # Code to create product
+        title = data['title']
+        category = data['category']
+        category = get_object_or_404(Category, name=category)
 
-            type = data['type']
-            business_activity = data['businessActivity']
+        type = data['type']
+        business_activity = data['businessActivity']
 
-            product = Product.objects.create(author=user_id, title=title, business_activity=business_activity,type=type, category=category)
-            # nft_id = int(re.sub('[^0-9]', '', str(course.id))) % 2**256
-            product.token_id = random_with_N_digits(9)
-            product.save()
+        product = Product.objects.create(author=user_id, title=title, business_activity=business_activity,type=type, category=category)
+        # nft_id = int(re.sub('[^0-9]', '', str(course.id))) % 2**256
+        product.token_id = random_with_N_digits(9)
+        product.save()
 
-            sellers = Sellers.objects.create(
-                author=payload['user_id'],
-                address=payload['address'],
-                polygon_address=payload['polygon_address'],
-                product=product 
-                )
-            product.sellers.add(sellers)
+        sellers = Sellers.objects.create(
+            author=payload['user_id'],
+            address=data['address'],
+            polygon_address=data['polygonAddress'],
+            product=product 
+            )
+        product.sellers.add(sellers)
 
-            serializer = ProductSerializer(product)
-            return self.send_response(serializer.data,status=status.HTTP_201_CREATED)
-        except:
-            return self.send_error('You dont have the permissions to create a product.',status=status.HTTP_403_FORBIDDEN)
+        serializer = ProductSerializer(product)
+        return self.send_response(serializer.data,status=status.HTTP_201_CREATED)
+        # except:
+        #     return self.send_error('You dont have the permissions to create a product.',status=status.HTTP_403_FORBIDDEN)
         
 class EditProductNFTAddressView(StandardAPIView):
     permission_classes = (permissions.AllowAny,)
@@ -464,35 +472,43 @@ class ListProductsView(StandardAPIView):
     permission_classes = (permissions.AllowAny,)
 
     def get(self, request, *args, **kwargs):
-        try:
-            payload = validate_token(request)
-            user_id = payload['user_id']
-            # Get the first 20 published products 
-            products_shown = Product.objects.filter(status='published').values_list('id')[:20]
-            
-            for product in products_shown:
-                item={}
-                item['user']=user_id
-                item['product']=str(product[0])
-                producer.produce(
-                    'product_interaction',
-                    key='product_view_impressions',
-                    value=json.dumps(item).encode('utf-8')
-                )
-            producer.flush()
-            # update the impressions field for only the products shown
-            Product.objects.filter(id__in=products_shown).update(impressions=F('impressions') + 1)
-            products_shown = Product.objects.filter(id__in=products_shown)
-            serializer = ProductListSerializer(products_shown, many=True)
-            return self.paginate_response(request, serializer.data)
-        except:
-            # Get the first 20 published products 
-            products_shown = Product.objects.filter(status='published').values_list('id', flat=True)[:20]
-            # update the impressions field for only the products shown
-            Product.objects.filter(id__in=products_shown).update(impressions=F('impressions') + 1)
-            products_shown = Product.objects.filter(id__in=products_shown)
-            serializer = ProductListSerializer(products_shown, many=True)
-            return self.paginate_response(request, serializer.data)
+        cache_key = "product_list"
+        product_list = cache.get(cache_key)
+
+        if product_list is None:
+            try:
+                payload = validate_token(request)
+                user_id = payload['user_id']
+                # Get the first 20 published products 
+                products_shown = Product.objects.filter(status='published').values_list('id')[:20]
+                
+                for product in products_shown:
+                    item={}
+                    item['user']=user_id
+                    item['product']=str(product[0])
+                    producer.produce(
+                        'product_interaction',
+                        key='product_view_impressions',
+                        value=json.dumps(item).encode('utf-8')
+                    )
+                producer.flush()
+                # update the impressions field for only the products shown
+                Product.objects.filter(id__in=products_shown).update(impressions=F('impressions') + 1)
+                products_shown = Product.objects.filter(id__in=products_shown)
+                serializer = ProductListSerializer(products_shown, many=True)
+                cache.set(cache_key, serializer.data, 900)  # Cache for 15 minutes
+                return self.paginate_response(request, serializer.data)
+            except:
+                # Get the first 20 published products 
+                products_shown = Product.objects.filter(status='published').values_list('id', flat=True)[:20]
+                # update the impressions field for only the products shown
+                Product.objects.filter(id__in=products_shown).update(impressions=F('impressions') + 1)
+                products_shown = Product.objects.filter(id__in=products_shown)
+                serializer = ProductListSerializer(products_shown, many=True)
+                cache.set(cache_key, serializer.data, 900)  # Cache for 15 minutes
+                return self.paginate_response(request, serializer.data)
+        else:
+            return self.paginate_response(request, product_list)
 
 
 class ListProductsFromIDListView(StandardAPIView):
@@ -500,14 +516,17 @@ class ListProductsFromIDListView(StandardAPIView):
 
     def post(self, request, *args, **kwargs):
         data = request.data
+        # cache_key = 'product_items_' + '_'.join([str(item['product']) for item in data])
+        # cached_result = cache.get(cache_key)
+
+        # if cached_result:
+        #     return self.send_response(cached_result, status=status.HTTP_200_OK)
+        
         product_items = []
 
         for item in data:
             product = Product.objects.get(id=item['product'])
             base_price = 0
-
-            print(item)
-
             count = item['count']
             color = Color.objects.get(pk=item['color']) if item['color'] else None
             size = Size.objects.get(pk=item['size']) if item['size'] else None
@@ -553,6 +572,8 @@ class ListProductsFromIDListView(StandardAPIView):
                 'coupon':response['results'] if coupon else None,
             }
             product_items.append(product_item)
+        # Cache the result
+        # cache.set(cache_key, product_items, 300)  # Cache for 300 seconds
         return self.send_response(product_items, status=status.HTTP_200_OK)
 
 
@@ -1229,28 +1250,28 @@ class CreateDetailView(StandardAPIView):
         payload = validate_token(request)
         user_id = payload['user_id']
         data = self.request.data
+        print(data)
+        # try:
+        product = get_object_or_404(Product, id=data['productUUID'], author=user_id)
 
-        try:
-            product = get_object_or_404(Product, id=data['productUUID'], author=user_id)
+        result = []
+        for detail in data['details']:
+            obj, created = Details.objects.update_or_create(
+                author=user_id, product=product, id=detail['id'],
+                defaults={'title': detail['title'], 'body': detail['body'], 'position_id':detail['position_id']},
+            )
+            product.details.add(obj)
+            result.append(obj)
 
-            result = []
-            for detail in data['details']:
-                obj, created = Details.objects.update_or_create(
-                    author=user_id, product=product, id=detail['id'],
-                    defaults={'title': detail['title'], 'body': detail['body'], 'position_id':detail['position_id']},
-                )
-                product.details.add(obj)
-                result.append(obj)
-
-            product_data = get_product_data(product.id, user_id)
-            
-            return self.send_response(product_data, status=status.HTTP_200_OK)
-        except Product.DoesNotExist:
-            return self.send_error('product with this ID does not exist or user_id did not match with product author',status=status.HTTP_404_NOT_FOUND)
-        except PermissionDenied as e:
-            return self.send_error(str(e), status=status.HTTP_403_FORBIDDEN)
-        except:
-            return self.send_error('Bad Request',status=status.HTTP_400_BAD_REQUEST)
+        product_data = get_product_data(product.id, user_id)
+        
+        return self.send_response(product_data, status=status.HTTP_200_OK)
+        # except Product.DoesNotExist:
+        #     return self.send_error('product with this ID does not exist or user_id did not match with product author',status=status.HTTP_404_NOT_FOUND)
+        # except PermissionDenied as e:
+        #     return self.send_error(str(e), status=status.HTTP_403_FORBIDDEN)
+        # except:
+        #     return self.send_error('Bad Request',status=status.HTTP_400_BAD_REQUEST)
 
 
 class DeleteDetailView(StandardAPIView):
@@ -1690,48 +1711,75 @@ class DeleteMaterialView(StandardAPIView):
             return self.send_error('Only the product author may delete this', status=status.HTTP_401_UNAUTHORIZED)
         
 
+def parse_image_query_dict(query_dict):
+    data = dict(query_dict)
+    images_data = {}
+    for key, value in data.items():
+        if key.startswith("imagesList"):
+            index, attr = key.split("].", 1)
+            index = int(index.split("[")[1])
+            if index not in images_data:
+                images_data[index] = {}
+            images_data[index][attr] = value[0]
+        else:
+            data[key] = value[0]
 
+    data['imagesList'] = [v for k, v in images_data.items()]
+    return data
 
 class UpdateImageView(StandardAPIView):
     permission_classes = (permissions.AllowAny,)
-    def post(self, request, format=None):
 
+    def post(self, request, format=None):
         payload = validate_token(request)
         user_id = payload['user_id']
-        data = self.request.data
-
+        query_dict_data = request.POST  # Get the QueryDict data from the POST request
+        data = parse_image_query_dict(query_dict_data)  # Convert the QueryDict to the desired dictionary format
         try:
             product = get_object_or_404(Product, id=data['productUUID'], author=user_id)
 
+            allowed_extensions = ['jpg', 'jpeg', 'png']
+            
             result = []
             for image in data['imagesList']:
-                if image['file']:
+                defaults = {'title': image['title'], 'position_id': image['position_id']}
+                if ';base64,' in image['file']:
                     format, imgstr = image['file'].split(';base64,')
                     ext = format.split('/')[-1]
-                    data = ContentFile(base64.b64decode(imgstr), name='temp.' + ext)
+                    data = ContentFile(base64.b64decode(imgstr))
+
+                    # Generate a unique file name
+                    file_name, file_ext = os.path.splitext(image['title'])
+                    unique_name = f"{file_name}_{secrets.token_hex(8)}{file_ext}"
+                    data.name = unique_name
+                    
                     # validate the file type
-                    if ext not in ['jpg', 'jpeg', 'png']:
+                    if ext not in allowed_extensions:
                         raise ValidationError('Invalid file type. Only jpeg and png are allowed.')
+
                     # validate the file size
                     if data.size > 2000000:
                         raise ValidationError('File size should be less than 2MB')
-                    # validate the file dimensions
-                    # img = Image.open(data)
-                    # width, height = img.size
-                    # if width != 64 or height != 64:
-                    #     raise ValidationError('Invalid image dimensions. Only 64x64 pixels images are allowed.')
-                    image['file'] = data
+                    
+                    defaults['file'] = data
+                elif image['file'].startswith('/media/') or image['file'].startswith('http'):
+                    # Validate the file type based on the URL
+                    file_name, file_ext = os.path.splitext(image['file'])
+                    if file_ext[1:] not in allowed_extensions:
+                        raise ValidationError('Invalid file type. Only jpeg and png are allowed.')
+                else:
+                    raise ValidationError('Invalid image file format.')
+
                 obj, created = Image.objects.update_or_create(
                     id=image['id'], author=user_id, product=product,
-                    defaults={'title': image['title'], 'position_id':image['position_id'],'file':image['file']},
+                    defaults=defaults,
                 )
                 result.append(obj)
 
-                if(created):
+                if created:
                     product.images.add(obj)
 
             product_data = get_product_data(product.id, user_id)
-
             return self.send_response(product_data, status=status.HTTP_200_OK)
         except Product.DoesNotExist:
             return self.send_error('Course with this ID does not exist or user_id did not match with course author',status=status.HTTP_404_NOT_FOUND)
@@ -1768,44 +1816,79 @@ class DeleteImageView(StandardAPIView):
             return self.send_error('Only the product author may delete this', status=status.HTTP_401_UNAUTHORIZED)
 
 
+def parse_video_query_dict(query_dict):
+    data = dict(query_dict)
+    videos_data = {}
+    for key, value in data.items():
+        if key.startswith("videosList"):
+            index, attr = key.split("].", 1)
+            index = int(index.split("[")[1])
+            if index not in videos_data:
+                videos_data[index] = {}
+            videos_data[index][attr] = value[0]
+        else:
+            data[key] = value[0]
+
+    data['videosList'] = [v for k, v in videos_data.items()]
+    return data
 class UpdateVideoView(StandardAPIView):
     permission_classes = (permissions.AllowAny,)
-    def post(self, request, format=None):
 
+    def post(self, request, format=None):
         payload = validate_token(request)
         user_id = payload['user_id']
-        data = self.request.data
-
+        query_dict_data = request.POST  # Get the QueryDict data from the POST request
+        data = parse_video_query_dict(query_dict_data)  # Convert the QueryDict to the desired dictionary format
         try:
             product = get_object_or_404(Product, id=data['productUUID'], author=user_id)
+            product_data = get_product_data(product.id, user_id)
+
+            allowed_extensions = ['mp4', 'm4v', 'mpeg', 'm4p', 'asf', 'mkv', 'webm']
 
             result = []
             for video in data['videosList']:
-                if video['file']:
+                defaults = {'title': video['title'], 'position_id': video['position_id']}
+                if ';base64,' in video['file']:
                     format, videostr = video['file'].split(';base64,')
                     ext = format.split('/')[-1]
-                    video_data = ContentFile(base64.b64decode(videostr), name='temp.' + ext)
+                    data = ContentFile(base64.b64decode(videostr))
+
+                    # Generate a unique file name
+                    file_name, file_ext = os.path.splitext(video['title'])
+                    unique_name = f"{file_name}_{secrets.token_hex(8)}{file_ext}"
+                    data.name = unique_name
+
                     # validate the file type
-                    if ext not in ['mp4','m4v','mpeg','m4p','.asf','mkv','webm']:
-                        raise ValidationError('Invalid file type. Only mp4,m4v,mpeg,m4p,.asf,mkv,webm are allowed.')
+                    if ext not in allowed_extensions:
+                        raise ValidationError('Invalid file type. Only mp4,m4v,mpeg,m4p,asf,mkv,webm are allowed.')
+
                     # validate the file size
-                    if video_data.size > 2000000000:
+                    if data.size > 2 * 1024 * 1024 * 1024:
                         raise ValidationError('File size should be less than 2GB')
-                    video['file'] = video_data
+
+                    defaults['file'] = data
+                elif video['file'].startswith('/media/') or video['file'].startswith('http'):
+                    # Validate the file type based on the URL
+                    file_name, file_ext = os.path.splitext(video['file'])
+                    if file_ext[1:] not in allowed_extensions:
+                        raise ValidationError('Invalid file type. Only mp4,m4v,mpeg,m4p,asf,mkv,webm are allowed.')
+                else:
+                    raise ValidationError('Invalid video file format.')
+
                 obj, created = Video.objects.update_or_create(
                     id=video['id'], author=user_id, product=product,
-                    defaults={'title': video['title'], 'position_id':video['position_id'],'file':video['file']},
+                    defaults=defaults,
                 )
                 result.append(obj)
 
-                if(created):
+                if created:
                     product.videos.add(obj)
 
             product_data = get_product_data(product.id, user_id)
-
             return self.send_response(product_data, status=status.HTTP_200_OK)
+
         except Product.DoesNotExist:
-            return self.send_error('product with this ID does not exist or user_id did not match with product author',status=status.HTTP_404_NOT_FOUND)
+            return self.send_error('Course with this ID does not exist or user_id did not match with course author',status=status.HTTP_404_NOT_FOUND)
         except PermissionDenied as e:
             return self.send_error(str(e), status=status.HTTP_403_FORBIDDEN)
         except:
@@ -1914,71 +1997,69 @@ class UpdateProductView(StandardAPIView):
         user_id = payload['user_id']
         data = self.request.data
 
-        # try:
-        product = get_object_or_404(Product, id=data['productUUID'], author=user_id)
-        product_data = json.loads(data['productBody'])
+        try:
+            product = get_object_or_404(Product, id=data['productUUID'], author=user_id)
+            product_data = data['productBody']
 
-        # updating fields based on user inputs
-        update_data = {}
-        if product_data.get('title'):
-            update_data['title'] = product_data['title']
-        if product_data.get('description'):
-            update_data['description'] = product_data['description']
-        if product_data.get('subTitle'):
-            update_data['short_description'] = product_data['subTitle']
+            # updating fields based on user inputs
+            update_data = {}
+            if product_data.get('title'):
+                update_data['title'] = product_data['title']
+            if product_data.get('description'):
+                update_data['description'] = product_data['description']
+            if product_data.get('subTitle'):
+                update_data['short_description'] = product_data['subTitle']
 
-        if product_data.get('stock'):
-            if product.nft_address=='0':
-                update_data['quantity'] = product_data['stock']
-            if product.nft_address!='0':
-                print('Call Contract Change Stock')
-                # # Fetch ABI
-                # abi = get_polygon_contract_abi(product.nft_address)
-                ticket_location = os.path.join(settings.BASE_DIR, 'contracts', 'marketplace', 'ticket.sol')
-                with open(os.path.join(ticket_location, 'Ticket.json'), "r") as f:
-                    contract_json = json.load(f)
-                abi = contract_json['abi']
-                ticket_contract_instance = polygon_web3.eth.contract(abi=abi, address=product.nft_address)
+            if product_data.get('stock'):
+                if product.nft_address=='0':
+                    update_data['quantity'] = product_data['stock']
+                if product.nft_address!='0':
+                    print('Call Contract Change Stock')
+                    # # Fetch ABI
+                    # abi = get_polygon_contract_abi(product.nft_address)
+                    ticket_location = os.path.join(settings.BASE_DIR, 'contracts', 'marketplace', 'ticket.sol')
+                    with open(os.path.join(ticket_location, 'Ticket.json'), "r") as f:
+                        contract_json = json.load(f)
+                    abi = contract_json['abi']
+                    ticket_contract_instance = polygon_web3.eth.contract(abi=abi, address=product.nft_address)
 
-                seller_private_key = decrypt_polygon_private_key(payload['address'])
-                print(f'Editing Stock for {product.nft_address}')
-                # Create Approve Buyer as Discounted method
-                set_stock_txn = ticket_contract_instance.functions.setStock(int(product.token_id), int(product_data['stock'])).buildTransaction(
-                    {
-                        "gasPrice": polygon_web3.eth.gas_price,
-                        "from": payload['polygon_address'],
-                        "nonce": polygon_web3.eth.getTransactionCount(payload['polygon_address']),
-                    }
-                )
-                signed_tx = polygon_web3.eth.account.sign_transaction(set_stock_txn, private_key=seller_private_key)
-                tx_hash = polygon_web3.eth.send_raw_transaction(signed_tx.rawTransaction)
-                txReceipt = polygon_web3.eth.wait_for_transaction_receipt(tx_hash)
+                    seller_private_key = decrypt_polygon_private_key(payload['address'])
+                    print(f'Editing Stock for {product.nft_address}')
+                    # Create Approve Buyer as Discounted method
+                    set_stock_txn = ticket_contract_instance.functions.setStock(int(product.token_id), int(product_data['stock'])).buildTransaction(
+                        {
+                            "gasPrice": polygon_web3.eth.gas_price,
+                            "from": payload['polygon_address'],
+                            "nonce": polygon_web3.eth.getTransactionCount(payload['polygon_address']),
+                        }
+                    )
+                    signed_tx = polygon_web3.eth.account.sign_transaction(set_stock_txn, private_key=seller_private_key)
+                    tx_hash = polygon_web3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                    txReceipt = polygon_web3.eth.wait_for_transaction_receipt(tx_hash)
 
-                if txReceipt.get('status') == 0:
-                    return self.send_error('Error Editing Product Stock')
+                    if txReceipt.get('status') == 0:
+                        return self.send_error('Error Editing Product Stock')
 
 
-        if product_data.get('language'):
-            update_data['language'] = product_data['language']
-        if product_data.get('level'):
-            update_data['level'] = product_data['level']
-        if product_data.get('category'):
-            category = Category.objects.get(id=int(product_data['category']))
-            update_data['category'] = category
+            if product_data.get('language'):
+                update_data['language'] = product_data['language']
+            if product_data.get('level'):
+                update_data['level'] = product_data['level']
+            if product_data.get('category'):
+                category = get_object_or_404(Category, id=int(product_data['category']))  # Use get_object_or_404
+                update_data['category'] = category
 
-        # update the fields in the database
-        Product.objects.filter(id=product.id).update(**update_data)
+            Product.objects.filter(id=product.id).update(**update_data)
 
-        # get the updated product data
-        updated_product = Product.objects.get(id=product.id)
-        serialized_data = get_product_data(updated_product.id, user_id)
-        return self.send_response(serialized_data, status=status.HTTP_200_OK)
-        # except Product.DoesNotExist:
-        #     return self.send_error('product with this ID does not exist or user_id did not match with product author',status=status.HTTP_404_NOT_FOUND)
-        # except PermissionDenied as e:
-        #     return self.send_error(str(e), status=status.HTTP_403_FORBIDDEN)
-        # except:
-        #     return self.send_error('Bad Request',status=status.HTTP_400_BAD_REQUEST)
+            updated_product = Product.objects.get(id=product.id)
+            serialized_data = get_product_data(updated_product.id, user_id)
+            return self.send_response(serialized_data, status=status.HTTP_200_OK)
+        except Product.DoesNotExist:
+            return self.send_error('product with this ID does not exist or user_id did not match with product author',status=status.HTTP_404_NOT_FOUND)
+        except PermissionDenied as e:
+            return self.send_error(str(e), status=status.HTTP_403_FORBIDDEN)
+        except:
+            return self.send_error('Bad Request',status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -2216,6 +2297,13 @@ class SearchProductsView(StandardAPIView):
     permission_classes = (permissions.AllowAny,)
 
     def get(self, request, *args, **kwargs):
+
+        cache_key = f"search_products_{request.META['QUERY_STRING']}"
+        cached_result = cache.get(cache_key)
+
+        if cached_result:
+            return self.paginate_response(request, cached_result)
+        
         products = Product.objects.all()
 
         search = request.query_params.get('search', None)
@@ -2294,4 +2382,6 @@ class SearchProductsView(StandardAPIView):
             products = products.filter(author=author)
 
         serializer = ProductListSerializer(products, many=True)
+        # Cache the result
+        cache.set(cache_key, serializer.data, 300)  # Cache for 300 seconds
         return self.paginate_response(request, serializer.data)
