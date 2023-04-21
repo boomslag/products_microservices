@@ -163,11 +163,11 @@ def is_valid_nft_address(address):
 
     
 def get_public_product_data(identifier):
-    # cache_key = f"public_product_data-{identifier}"
-    # cached_result = cache.get(cache_key)
+    cache_key = f"public_product_data-{identifier}"
+    cached_result = cache.get(cache_key)
 
-    # if cached_result:
-    #     return cached_result
+    if cached_result:
+        return cached_result
     
     if is_valid_uuid(identifier):
         product, discount = get_discounted_product(id=identifier)
@@ -211,7 +211,7 @@ def get_public_product_data(identifier):
         'discount': discount,
     }
     # Cache the result
-    # cache.set(cache_key, product_data, 300)  # Cache for 300 seconds
+    cache.set(cache_key, product_data, 1800)  # Cache for 600 seconds
     return product_data
 
 
@@ -496,7 +496,7 @@ class ListProductsView(StandardAPIView):
                 Product.objects.filter(id__in=products_shown).update(impressions=F('impressions') + 1)
                 products_shown = Product.objects.filter(id__in=products_shown)
                 serializer = ProductListSerializer(products_shown, many=True)
-                cache.set(cache_key, serializer.data, 900)  # Cache for 15 minutes
+                cache.set(cache_key, serializer.data, 1800)  # Cache for 15 minutes
                 return self.paginate_response(request, serializer.data)
             except:
                 # Get the first 20 published products 
@@ -505,7 +505,7 @@ class ListProductsView(StandardAPIView):
                 Product.objects.filter(id__in=products_shown).update(impressions=F('impressions') + 1)
                 products_shown = Product.objects.filter(id__in=products_shown)
                 serializer = ProductListSerializer(products_shown, many=True)
-                cache.set(cache_key, serializer.data, 900)  # Cache for 15 minutes
+                cache.set(cache_key, serializer.data, 1800)  # Cache for 15 minutes
                 return self.paginate_response(request, serializer.data)
         else:
             return self.paginate_response(request, product_list)
@@ -516,11 +516,11 @@ class ListProductsFromIDListView(StandardAPIView):
 
     def post(self, request, *args, **kwargs):
         data = request.data
-        # cache_key = 'product_items_' + '_'.join([str(item['product']) for item in data])
-        # cached_result = cache.get(cache_key)
+        cache_key = 'product_items_' + '_'.join([str(item['product']) for item in data])
+        cached_result = cache.get(cache_key)
 
-        # if cached_result:
-        #     return self.send_response(cached_result, status=status.HTTP_200_OK)
+        if cached_result:
+            return self.send_response(cached_result, status=status.HTTP_200_OK)
         
         product_items = []
 
@@ -573,7 +573,7 @@ class ListProductsFromIDListView(StandardAPIView):
             }
             product_items.append(product_item)
         # Cache the result
-        # cache.set(cache_key, product_items, 300)  # Cache for 300 seconds
+        cache.set(cache_key, product_items, 1800)  # Cache for 300 seconds
         return self.send_response(product_items, status=status.HTTP_200_OK)
 
 
@@ -2383,5 +2383,5 @@ class SearchProductsView(StandardAPIView):
 
         serializer = ProductListSerializer(products, many=True)
         # Cache the result
-        cache.set(cache_key, serializer.data, 300)  # Cache for 300 seconds
+        cache.set(cache_key, serializer.data, 1800)  # Cache for 300 seconds
         return self.paginate_response(request, serializer.data)
